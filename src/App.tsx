@@ -62,6 +62,7 @@ const MAX_TRANSCRIPT_ENTRIES = 24
 function App() {
   const speechCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const chatListRef = useRef<HTMLDivElement | null>(null)
   const lastPromptAtRef = useRef(0)
   const spokenWindowRef = useRef('')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -83,6 +84,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null)
   const [audioUrl, setAudioUrl] = useState<string>('')
+  const isCameraEnabled = false
 
   const elapsed = useElapsedTime(recordingStartedAt)
 
@@ -101,6 +103,16 @@ function App() {
       }
     }
   }, [audioUrl])
+
+  useEffect(() => {
+    const node = chatListRef.current
+    if (!node) return
+
+    node.scrollTo({
+      top: node.scrollHeight,
+      behavior: 'smooth',
+    })
+  }, [chatMessages])
 
   const appendTranscript = (text: string) => {
     const cleanText = text.trim()
@@ -164,7 +176,7 @@ function App() {
           at: timestamp,
         }))
 
-        return [...next, ...current].slice(0, MAX_CHAT_MESSAGES)
+        return [...current, ...next].slice(-MAX_CHAT_MESSAGES)
       })
       setStatus('コメント更新済み')
     } catch (error) {
@@ -279,163 +291,226 @@ function App() {
 
   return (
     <main className="studio-shell">
-      <section className="hero-panel">
-        <div className="hero-backdrop" />
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Solo Podcast Broadcast Desk</p>
-            <h1>One-person live podcast screen</h1>
+      <div className="app-shell">
+        <header className="app-bar">
+          <div className="app-brand">
+            <div className="brand-mark" aria-hidden="true" />
+            <div>
+              <h1>Live Control Room</h1>
+              <p>ポッドキャスト配信を YouTube Live 風にモニタリング</p>
+            </div>
           </div>
-          <div className="live-status">
+          <div className="app-status">
             <span className={`dot ${recordingStartedAt ? 'is-live' : ''}`} />
-            <strong>{recordingStartedAt ? 'LIVE REC' : 'STANDBY'}</strong>
+            <strong>{recordingStartedAt ? 'ライブ配信中' : '配信準備中'}</strong>
             <span>{elapsed}</span>
           </div>
         </header>
 
-        <section className="stage-card">
-          <div className="stage-main">
-            <div className="glass">
-              <p className="section-label">Now talking</p>
-              <h2>{segmentTitle}</h2>
-              <p className="vibe">{vibe}</p>
-              <div className="quote-box">
-                <span className="quote-label">リアルタイム文字起こし</span>
-                <p>{interimText || transcriptEntries[0]?.text || '話し始めるとここに内容が出ます。'}</p>
-              </div>
+        <section className="dashboard">
+          <section className="hero-stage">
+            <div className="left-column">
+              <article className="player-card">
+                <div className="player-visual">
+                  <div className="player-chrome">
+                    <div className="status-icons">
+                      <StatusIcon kind="live" active={Boolean(recordingStartedAt)} label={recordingStartedAt ? 'ライブ中' : '待機中'} />
+                      <StatusIcon kind="mic" active={isListening} label={isListening ? 'マイク入力中' : 'マイク停止'} />
+                      <StatusIcon kind="spark" active={isGenerating} label={isGenerating ? 'AI生成中' : 'AI待機'} />
+                      {isCameraEnabled ? <StatusIcon kind="camera" active label="カメラ有効" /> : null}
+                    </div>
+                    <span className="elapsed-badge">{elapsed}</span>
+                  </div>
+
+                  <div className="hero-copy">
+                    <h2>{segmentTitle}</h2>
+                    <p className="hero-meta">{vibe}</p>
+                    <div className="quote-box">
+                      <span className="quote-label">リアルタイム文字起こし</span>
+                      <p>{interimText || transcriptEntries[0]?.text || '話し始めるとここに内容が出ます。'}</p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <section className="video-meta">
+                <div className="video-heading">
+                  <div>
+                    <h3>{segmentTitle}</h3>
+                    <p>ひとりポッドキャスト配信 / AI ライブチャット連動</p>
+                  </div>
+                  <div className="meta-stats">
+                    <span>{chatMessages.length} chats</span>
+                    <span>{transcriptEntries.length} logs</span>
+                    <span>{recordingStartedAt ? 'LIVE' : 'READY'}</span>
+                  </div>
+                </div>
+
+                <div className="status-strip">
+                  <StatusPill label="配信" value={recordingStartedAt ? 'LIVE' : 'READY'} active={Boolean(recordingStartedAt)} />
+                  <StatusPill label="音声" value={isListening ? 'ON' : 'OFF'} active={isListening} />
+                  <StatusPill label="AI" value={isGenerating ? 'RUN' : 'IDLE'} active={isGenerating} />
+                  <StatusPill label="状態" value={status} />
+                </div>
+              </section>
             </div>
 
-            <div className="meter-grid">
-              <MetricCard label="Speech" value={isListening ? 'ON AIR' : 'OFF'} detail={status} />
-              <MetricCard label="Gemini" value={isGenerating ? 'THINKING' : 'READY'} detail="実況コメント生成" />
-              <MetricCard
-                label="Output"
-                value={recordingStartedAt ? 'REC' : 'ARMED'}
-                detail="この画面をそのまま録画"
-              />
-            </div>
-          </div>
+            <aside className="right-column">
+              <section className="side-card chat-panel">
+                <div className="chat-header">
+                  <div>
+                    <h3>ライブチャット</h3>
+                    <p className="panel-subtle">視聴者コメントを模した AI メッセージ</p>
+                  </div>
+                  <div className="chat-actions">
+                    <span className="chat-count">{chatMessages.length} 件</span>
+                  </div>
+                </div>
 
-          <aside className="chat-panel">
-            <div className="chat-header">
-              <div>
-                <p className="section-label">AI audience</p>
-                <h3>Generated comments</h3>
-              </div>
-              <button className="ghost-button" onClick={() => void requestCommentary(true)}>
-                今すぐ更新
+                <div className="chat-list" ref={chatListRef}>
+                  {chatMessages.length === 0 ? (
+                    <div className="empty-chat">
+                      <p>会話が進むと Gemini がライブチャット風の反応を追加します。</p>
+                    </div>
+                  ) : (
+                    chatMessages.map((message) => (
+                      <article className="chat-message" key={message.id}>
+                        <div className="chat-meta">
+                          <strong>{message.author}</strong>
+                          <span className="chat-handle">{message.handle}</span>
+                          <time>{message.at}</time>
+                        </div>
+                        <p className="chat-text">{message.message}</p>
+                        <span className="tone">{message.tone}</span>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            </aside>
+          </section>
+
+          <section className="control-strip">
+            <div className="controls">
+              <button className="control-button primary" onClick={isListening ? stopListening : startListening}>
+                {isListening ? '音声認識を停止' : '音声認識を開始'}
+              </button>
+              <button
+                className="control-button"
+                onClick={recordingStartedAt ? stopAudioCapture : startAudioCapture}
+              >
+                {recordingStartedAt ? 'マイク録音を停止' : 'マイク録音を開始'}
+              </button>
+              <button className="control-button subtle" onClick={() => void requestCommentary(true)}>
+                コメント更新
               </button>
             </div>
 
-            <div className="chat-list">
-              {chatMessages.length === 0 ? (
-                <div className="empty-chat">
-                  <p>会話が進むと Gemini が実況コメントを流します。</p>
-                </div>
-              ) : (
-                chatMessages.map((message) => (
-                  <article className="chat-bubble" key={message.id}>
-                    <div className="chat-meta">
-                      <strong>{message.author}</strong>
-                      <span>{message.handle}</span>
-                      <time>{message.at}</time>
-                    </div>
-                    <p>{message.message}</p>
-                    <span className="tone">{message.tone}</span>
-                  </article>
-                ))
-              )}
-            </div>
-          </aside>
-        </section>
-
-        <section className="control-strip">
-          <div className="ticker">
-            <span className="ticker-head">TOPICS</span>
-            <div className="ticker-track">
-              {[...tickerItems, ...tickerItems].map((item, index) => (
-                <span key={`${item}-${index}`}>{item}</span>
-              ))}
-            </div>
-          </div>
-
-          <div className="controls">
-            <button className="primary-button" onClick={isListening ? stopListening : startListening}>
-              {isListening ? '音声認識を止める' : '音声認識を始める'}
-            </button>
-            <button
-              className="secondary-button"
-              onClick={recordingStartedAt ? stopAudioCapture : startAudioCapture}
-            >
-              {recordingStartedAt ? 'マイク録音を停止' : 'マイク録音を開始'}
-            </button>
-          </div>
-        </section>
-
-        <section className="bottom-grid">
-          <div className="transcript-panel">
-            <div className="panel-heading">
-              <p className="section-label">Transcript log</p>
-              <strong>{transcriptEntries.length} entries</strong>
-            </div>
-            <div className="transcript-list">
-              {transcriptEntries.length === 0 ? (
-                <p className="placeholder">音声認識を始めるとログがここに溜まります。</p>
-              ) : (
-                transcriptEntries.map((entry) => (
-                  <article className="transcript-item" key={entry.id}>
-                    <time>{entry.at}</time>
-                    <p>{entry.text}</p>
-                  </article>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="notes-panel">
-            <div className="panel-heading">
-              <p className="section-label">Output helper</p>
-              <strong>録画向け</strong>
-            </div>
-            <p className="helper-copy">
-              画面収録は macOS 標準の画面録画や OBS でこのウィンドウ全体を撮れば、そのまま配信風の映像として出力できます。
-            </p>
-            {audioUrl ? (
-              <div className="audio-box">
-                <audio controls src={audioUrl} />
-                <a href={audioUrl} download="podcast-session.webm" className="download-link">
-                  音声ファイルを保存
-                </a>
+            <div className="ticker">
+              <span className="ticker-head">TOP CHAT</span>
+              <div className="ticker-track compact">
+                {[...tickerItems, ...tickerItems].map((item, index) => (
+                  <span key={`${item}-${index}`}>{item}</span>
+                ))}
               </div>
-            ) : (
-              <p className="placeholder">マイク録音を停止すると音声ファイルを保存できます。</p>
-            )}
-            <div className="summary-box">
-              <p className="summary-label">Transcript snapshot</p>
-              <p>{transcriptText || 'まだ発話はありません。'}</p>
             </div>
-          </div>
+          </section>
+
+          <section className="bottom-grid">
+            <section className="transcript-panel">
+              <div className="panel-heading">
+                <div>
+                  <h3>文字起こし</h3>
+                  <p className="panel-subtle">配信中の発話ログ</p>
+                </div>
+                <strong>{transcriptEntries.length} entries</strong>
+              </div>
+              <div className="transcript-list">
+                {transcriptEntries.length === 0 ? (
+                  <p className="placeholder">音声認識を始めるとログがここに溜まります。</p>
+                ) : (
+                  transcriptEntries.map((entry) => (
+                    <article className="transcript-item" key={entry.id}>
+                      <time>{entry.at}</time>
+                      <p>{entry.text}</p>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="notes-panel">
+              <div className="panel-heading">
+                <div>
+                  <h3>出力とメモ</h3>
+                  <p className="panel-subtle">配信レイアウトのメモとトランスクリプト要約</p>
+                </div>
+                <strong>Control Room</strong>
+              </div>
+              <p className="helper-copy">
+                OBS や macOS 標準の画面録画でこのウィンドウをそのまま取り込めば、配信管理画面とプレビューを一体化した見た目で出力できます。
+              </p>
+              <div className="audio-box">
+                <div className="audio-copy">
+                  <p className="summary-label">Audio export</p>
+                  <p>{audioUrl ? '収録音声を確認して保存できます。' : '録音停止後に音声を書き出せます。'}</p>
+                </div>
+                {audioUrl ? (
+                  <>
+                    <audio controls src={audioUrl} />
+                    <a href={audioUrl} download="podcast-session.webm" className="download-link">
+                      音声ファイルを保存
+                    </a>
+                  </>
+                ) : (
+                  <p className="placeholder">まだ保存可能な音声はありません。</p>
+                )}
+              </div>
+              <div className="summary-box">
+                <p className="summary-label">Transcript snapshot</p>
+                <p>{transcriptText || 'まだ発話はありません。'}</p>
+              </div>
+            </section>
+          </section>
         </section>
-      </section>
+      </div>
     </main>
   )
 }
 
-function MetricCard({
+function StatusPill({
   label,
   value,
-  detail,
+  active = false,
 }: {
   label: string
   value: string
-  detail: string
+  active?: boolean
 }) {
   return (
-    <article className="metric-card">
+    <article className={`status-pill ${active ? 'is-active' : ''}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-      <p>{detail}</p>
     </article>
+  )
+}
+
+function StatusIcon({
+  kind,
+  active,
+  label,
+}: {
+  kind: 'live' | 'mic' | 'spark' | 'camera'
+  active: boolean
+  label: string
+}) {
+  return (
+    <span className={`status-icon ${active ? 'is-active' : ''}`} aria-label={label} title={label}>
+      {kind === 'live' ? <span className="status-icon-dot" /> : null}
+      {kind === 'mic' ? '●' : null}
+      {kind === 'spark' ? '✦' : null}
+      {kind === 'camera' ? '▣' : null}
+    </span>
   )
 }
 

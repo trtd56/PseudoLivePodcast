@@ -1,18 +1,23 @@
 :root {
   font-family: var(--body);
-  color: #f8f4ee;
-  background:
-    radial-gradient(circle at top, #253451 0%, #101524 38%, #090d16 100%);
+  color: #0f0f0f;
+  background: #f9f9f9;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --display: 'Avenir Next', 'Futura', 'Trebuchet MS', sans-serif;
+  --display: 'IBM Plex Sans JP', 'Hiragino Sans', sans-serif;
   --body: 'IBM Plex Sans JP', 'Hiragino Sans', sans-serif;
-  --text-primary: #f8f4ee;
-  --text-muted: #a9b5ca;
-  --accent-soft: #ffd166;
+  --app-bg: #f9f9f9;
+  --surface: #ffffff;
+  --surface-subtle: #f8f8f8;
+  --surface-muted: #ffffff;
+  --text-primary: #0f0f0f;
+  --text-secondary: #606060;
+  --text-tertiary: #909090;
+  --border-soft: #e5e5e5;
+  --shadow-card: 0 1px 2px rgba(15, 15, 15, 0.06), 0 8px 24px rgba(15, 15, 15, 0.04);
 }
 
 * {
@@ -27,6 +32,7 @@ body,
 
 body {
   margin: 0;
+  background: var(--app-bg);
 }
 
 button,
