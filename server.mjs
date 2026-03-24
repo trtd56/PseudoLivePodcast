@@ -25,7 +25,10 @@ app.post('/api/commentary', async (req, res) => {
     res.json(response)
   } catch (error) {
     console.error(error)
-    res.status(500).json({ error: 'Failed to generate commentary' })
+    res.status(500).json({
+      error: 'Failed to generate commentary',
+      details: error instanceof Error ? error.message : 'Unknown server error',
+    })
   }
 })
 

@@ -17,6 +17,9 @@ export default async function handler(req, res) {
     return res.status(200).json(response)
   } catch (error) {
     console.error(error)
-    return res.status(500).json({ error: 'Failed to generate commentary' })
+    return res.status(500).json({
+      error: 'Failed to generate commentary',
+      details: error instanceof Error ? error.message : 'Unknown server error',
+    })
   }
 }

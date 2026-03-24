@@ -187,7 +187,8 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('commentary request failed')
+        const payload = (await response.json().catch(() => null)) as { details?: string } | null
+        throw new Error(payload?.details ?? 'commentary request failed')
       }
 
       const data = (await response.json()) as CommentaryResponse
