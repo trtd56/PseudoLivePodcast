@@ -1,0 +1,41 @@
+:root {
+  font-family: var(--body);
+  color: #f8f4ee;
+  background:
+    radial-gradient(circle at top, #253451 0%, #101524 38%, #090d16 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --display: 'Avenir Next', 'Futura', 'Trebuchet MS', sans-serif;
+  --body: 'IBM Plex Sans JP', 'Hiragino Sans', sans-serif;
+  --text-primary: #f8f4ee;
+  --text-muted: #a9b5ca;
+  --accent-soft: #ffd166;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
