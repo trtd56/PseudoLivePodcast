@@ -56,6 +56,8 @@ declare global {
 }
 
 const COMMENTARY_COOLDOWN_MS = 12000
+const COMMENTARY_FLUSH_INTERVAL_MS = 10000
+const COMMENTARY_BATCH_SIZE = 1
 const MAX_CHAT_MESSAGES = 18
 const MAX_TRANSCRIPT_ENTRIES = 24
 
@@ -65,6 +67,7 @@ function App() {
   const chatListRef = useRef<HTMLDivElement | null>(null)
   const lastPromptAtRef = useRef(0)
   const spokenWindowRef = useRef('')
+  const pendingCommentsRef = useRef<GeneratedComment[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const captureStreamRef = useRef<MediaStream | null>(null)
@@ -75,16 +78,14 @@ function App() {
   const [interimText, setInterimText] = useState('')
   const [segmentTitle, setSegmentTitle] = useState('オープニング')
   const [vibe, setVibe] = useState('落ち着いた導入')
-  const [tickerItems, setTickerItems] = useState<string[]>([
-    'マイクを許可して開始',
-    'AIコメントはGeminiで自動生成',
-    'この画面をそのまま録画して配信風に出力',
-  ])
   const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null)
   const [audioUrl, setAudioUrl] = useState<string>('')
+  const [queuedCommentCount, setQueuedCommentCount] = useState(0)
   const isCameraEnabled = false
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false)
+  const [isNotesOpen, setIsNotesOpen] = useState(false)
 
   const elapsed = useElapsedTime(recordingStartedAt)
 
@@ -114,6 +115,32 @@ function App() {
     })
   }, [chatMessages])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (pendingCommentsRef.current.length === 0) return
+
+      const nextBatch = pendingCommentsRef.current.splice(0, COMMENTARY_BATCH_SIZE)
+      const timestamp = new Date().toLocaleTimeString('ja-JP', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+
+      setChatMessages((current) => {
+        const queued = nextBatch.map((comment) => ({
+          ...comment,
+          id: crypto.randomUUID(),
+          at: timestamp,
+        }))
+
+        return [...current, ...queued].slice(-MAX_CHAT_MESSAGES)
+      })
+      setQueuedCommentCount(pendingCommentsRef.current.length)
+      setStatus(pendingCommentsRef.current.length > 0 ? `コメント待機中 (${pendingCommentsRef.current.length}件)` : 'コメント更新済み')
+    }, COMMENTARY_FLUSH_INTERVAL_MS)
+
+    return () => window.clearInterval(timer)
+  }, [])
+
   const appendTranscript = (text: string) => {
     const cleanText = text.trim()
     if (!cleanText) return
@@ -142,7 +169,7 @@ function App() {
 
     lastPromptAtRef.current = now
     setIsGenerating(true)
-    setStatus('Gemini がコメント生成中')
+    setStatus('コメント生成中')
 
     try {
       const response = await fetch('/api/commentary', {
@@ -152,7 +179,10 @@ function App() {
         },
         body: JSON.stringify({
           transcript,
-          recentComments: chatMessages.slice(0, 6).map((message) => message.message),
+          recentComments: [
+            ...chatMessages.slice(-6).map((message) => message.message),
+            ...pendingCommentsRef.current.slice(-6).map((message) => message.message),
+          ].slice(-6),
         }),
       })
 
@@ -161,27 +191,15 @@ function App() {
       }
 
       const data = (await response.json()) as CommentaryResponse
-      const timestamp = new Date().toLocaleTimeString('ja-JP', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })
 
       setSegmentTitle(data.segmentTitle)
       setVibe(data.vibe)
-      setTickerItems(data.ticker.slice(0, 4))
-      setChatMessages((current) => {
-        const next = data.comments.map((comment) => ({
-          ...comment,
-          id: crypto.randomUUID(),
-          at: timestamp,
-        }))
-
-        return [...current, ...next].slice(-MAX_CHAT_MESSAGES)
-      })
-      setStatus('コメント更新済み')
+      pendingCommentsRef.current.push(...data.comments)
+      setQueuedCommentCount(pendingCommentsRef.current.length)
+      setStatus(`コメント待機中 (${pendingCommentsRef.current.length}件)`)
     } catch (error) {
       console.error(error)
-      setStatus('Gemini コメント生成に失敗')
+      setStatus('コメント生成に失敗')
     } finally {
       setIsGenerating(false)
     }
@@ -190,56 +208,67 @@ function App() {
   const startListening = async () => {
     if (!speechCtor) {
       setStatus('このブラウザでは音声認識に未対応')
-      return
+      return false
     }
 
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      recognitionRef.current = null
+    if (isListening) {
+      return true
     }
 
-    const recognition = new speechCtor()
-    recognition.lang = 'ja-JP'
-    recognition.continuous = true
-    recognition.interimResults = true
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+        recognitionRef.current = null
+      }
 
-    recognition.onresult = (event) => {
-      let finalChunk = ''
-      let interimChunk = ''
+      const recognition = new speechCtor()
+      recognition.lang = 'ja-JP'
+      recognition.continuous = true
+      recognition.interimResults = true
 
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        const text = result[0]?.transcript ?? ''
+      recognition.onresult = (event) => {
+        let finalChunk = ''
+        let interimChunk = ''
 
-        if (result.isFinal) {
-          finalChunk += `${text} `
-        } else {
-          interimChunk += text
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index]
+          const text = result[0]?.transcript ?? ''
+
+          if (result.isFinal) {
+            finalChunk += `${text} `
+          } else {
+            interimChunk += text
+          }
+        }
+
+        setInterimText(interimChunk.trim())
+
+        if (finalChunk.trim()) {
+          appendTranscript(finalChunk)
+          void requestCommentary()
         }
       }
 
-      setInterimText(interimChunk.trim())
-
-      if (finalChunk.trim()) {
-        appendTranscript(finalChunk)
-        void requestCommentary()
+      recognition.onerror = (event) => {
+        setStatus(`音声認識エラー: ${event.error}`)
+        setIsListening(false)
       }
-    }
 
-    recognition.onerror = (event) => {
-      setStatus(`音声認識エラー: ${event.error}`)
-      setIsListening(false)
-    }
+      recognition.onend = () => {
+        setIsListening(false)
+        setInterimText('')
+      }
 
-    recognition.onend = () => {
-      setIsListening(false)
-      setInterimText('')
+      recognition.start()
+      recognitionRef.current = recognition
+      setIsListening(true)
+      setStatus('音声認識中')
+      return true
+    } catch (error) {
+      console.error(error)
+      setStatus('音声認識を開始できませんでした')
+      return false
     }
-
-    recognition.start()
-    recognitionRef.current = recognition
-    setIsListening(true)
-    setStatus('音声認識中')
   }
 
   const stopListening = () => {
@@ -251,6 +280,10 @@ function App() {
   }
 
   const startAudioCapture = async () => {
+    if (mediaRecorderRef.current) {
+      return true
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       captureStreamRef.current = stream
@@ -276,10 +309,13 @@ function App() {
       mediaRecorderRef.current = recorder
       setRecordingStartedAt(Date.now())
       setStatus('収録中')
+      return true
     } catch (error) {
       console.error(error)
       setStatus('マイク録音を開始できませんでした')
+      return
     }
+    return false
   }
 
   const stopAudioCapture = () => {
@@ -287,6 +323,25 @@ function App() {
     mediaRecorderRef.current = null
     setRecordingStartedAt(null)
     setStatus('収録停止')
+  }
+
+  const startSession = async () => {
+    const didStartCapture = await startAudioCapture()
+    if (!didStartCapture) return
+
+    const didStartListening = await startListening()
+    if (!didStartListening) {
+      stopAudioCapture()
+      return
+    }
+
+    setStatus('収録と音声認識を開始')
+  }
+
+  const stopSession = () => {
+    stopListening()
+    stopAudioCapture()
+    setStatus('収録と音声認識を停止')
   }
 
   return (
@@ -300,10 +355,18 @@ function App() {
               <p>ポッドキャスト配信を YouTube Live 風にモニタリング</p>
             </div>
           </div>
-          <div className="app-status">
-            <span className={`dot ${recordingStartedAt ? 'is-live' : ''}`} />
-            <strong>{recordingStartedAt ? 'ライブ配信中' : '配信準備中'}</strong>
-            <span>{elapsed}</span>
+          <div className="app-bar-actions">
+            <button
+              className="control-button primary"
+              onClick={isListening || recordingStartedAt ? stopSession : startSession}
+            >
+              {isListening || recordingStartedAt ? '音声認識と録音を停止' : '音声認識と録音を開始'}
+            </button>
+            <div className="app-status">
+              <span className={`dot ${recordingStartedAt ? 'is-live' : ''}`} />
+              <strong>{status}</strong>
+              <span>{elapsed}</span>
+            </div>
           </div>
         </header>
 
@@ -333,26 +396,6 @@ function App() {
                 </div>
               </article>
 
-              <section className="video-meta">
-                <div className="video-heading">
-                  <div>
-                    <h3>{segmentTitle}</h3>
-                    <p>ひとりポッドキャスト配信 / AI ライブチャット連動</p>
-                  </div>
-                  <div className="meta-stats">
-                    <span>{chatMessages.length} chats</span>
-                    <span>{transcriptEntries.length} logs</span>
-                    <span>{recordingStartedAt ? 'LIVE' : 'READY'}</span>
-                  </div>
-                </div>
-
-                <div className="status-strip">
-                  <StatusPill label="配信" value={recordingStartedAt ? 'LIVE' : 'READY'} active={Boolean(recordingStartedAt)} />
-                  <StatusPill label="音声" value={isListening ? 'ON' : 'OFF'} active={isListening} />
-                  <StatusPill label="AI" value={isGenerating ? 'RUN' : 'IDLE'} active={isGenerating} />
-                  <StatusPill label="状態" value={status} />
-                </div>
-              </section>
             </div>
 
             <aside className="right-column">
@@ -360,17 +403,43 @@ function App() {
                 <div className="chat-header">
                   <div>
                     <h3>ライブチャット</h3>
-                    <p className="panel-subtle">視聴者コメントを模した AI メッセージ</p>
+                    <p className="panel-subtle">視聴者コメント風メッセージ</p>
                   </div>
                   <div className="chat-actions">
+                    <button
+                      className={`icon-button ${isGenerating ? 'is-spinning' : ''}`}
+                      onClick={() => void requestCommentary(true)}
+                      disabled={isGenerating || !spokenWindowRef.current.trim()}
+                      aria-label="コメントを更新"
+                      title="コメントを更新"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M20 12a8 8 0 1 1-2.34-5.66"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M20 4v5h-5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
                     <span className="chat-count">{chatMessages.length} 件</span>
+                    <span className="chat-count">queue {queuedCommentCount}</span>
                   </div>
                 </div>
 
                 <div className="chat-list" ref={chatListRef}>
                   {chatMessages.length === 0 ? (
                     <div className="empty-chat">
-                      <p>会話が進むと Gemini がライブチャット風の反応を追加します。</p>
+                      <p>会話が進むとライブチャット風の反応が表示されます。</p>
                     </div>
                   ) : (
                     chatMessages.map((message) => (
@@ -390,108 +459,86 @@ function App() {
             </aside>
           </section>
 
-          <section className="control-strip">
-            <div className="controls">
-              <button className="control-button primary" onClick={isListening ? stopListening : startListening}>
-                {isListening ? '音声認識を停止' : '音声認識を開始'}
-              </button>
-              <button
-                className="control-button"
-                onClick={recordingStartedAt ? stopAudioCapture : startAudioCapture}
-              >
-                {recordingStartedAt ? 'マイク録音を停止' : 'マイク録音を開始'}
-              </button>
-              <button className="control-button subtle" onClick={() => void requestCommentary(true)}>
-                コメント更新
-              </button>
-            </div>
-
-            <div className="ticker">
-              <span className="ticker-head">TOP CHAT</span>
-              <div className="ticker-track compact">
-                {[...tickerItems, ...tickerItems].map((item, index) => (
-                  <span key={`${item}-${index}`}>{item}</span>
-                ))}
-              </div>
-            </div>
-          </section>
-
           <section className="bottom-grid">
-            <section className="transcript-panel">
+            <section className={`transcript-panel collapsible-panel ${isTranscriptOpen ? 'is-open' : ''}`}>
               <div className="panel-heading">
                 <div>
                   <h3>文字起こし</h3>
                   <p className="panel-subtle">配信中の発話ログ</p>
                 </div>
-                <strong>{transcriptEntries.length} entries</strong>
+                <div className="panel-heading-actions">
+                  <strong>{transcriptEntries.length} entries</strong>
+                  <button
+                    className="panel-toggle"
+                    onClick={() => setIsTranscriptOpen((current) => !current)}
+                    aria-expanded={isTranscriptOpen}
+                  >
+                    {isTranscriptOpen ? '閉じる' : '開く'}
+                  </button>
+                </div>
               </div>
-              <div className="transcript-list">
-                {transcriptEntries.length === 0 ? (
-                  <p className="placeholder">音声認識を始めるとログがここに溜まります。</p>
-                ) : (
-                  transcriptEntries.map((entry) => (
-                    <article className="transcript-item" key={entry.id}>
-                      <time>{entry.at}</time>
-                      <p>{entry.text}</p>
-                    </article>
-                  ))
-                )}
-              </div>
+              {isTranscriptOpen ? (
+                <div className="transcript-list">
+                  {transcriptEntries.length === 0 ? (
+                    <p className="placeholder">音声認識を始めるとログがここに溜まります。</p>
+                  ) : (
+                    transcriptEntries.map((entry) => (
+                      <article className="transcript-item" key={entry.id}>
+                        <time>{entry.at}</time>
+                        <p>{entry.text}</p>
+                      </article>
+                    ))
+                  )}
+                </div>
+              ) : null}
             </section>
 
-            <section className="notes-panel">
+            <section className={`notes-panel collapsible-panel ${isNotesOpen ? 'is-open' : ''}`}>
               <div className="panel-heading">
                 <div>
                   <h3>出力とメモ</h3>
                   <p className="panel-subtle">配信レイアウトのメモとトランスクリプト要約</p>
                 </div>
-                <strong>Control Room</strong>
-              </div>
-              <p className="helper-copy">
-                OBS や macOS 標準の画面録画でこのウィンドウをそのまま取り込めば、配信管理画面とプレビューを一体化した見た目で出力できます。
-              </p>
-              <div className="audio-box">
-                <div className="audio-copy">
-                  <p className="summary-label">Audio export</p>
-                  <p>{audioUrl ? '収録音声を確認して保存できます。' : '録音停止後に音声を書き出せます。'}</p>
+                <div className="panel-heading-actions">
+                  <strong>Control Room</strong>
+                  <button
+                    className="panel-toggle"
+                    onClick={() => setIsNotesOpen((current) => !current)}
+                    aria-expanded={isNotesOpen}
+                  >
+                    {isNotesOpen ? '閉じる' : '開く'}
+                  </button>
                 </div>
-                {audioUrl ? (
-                  <>
-                    <audio controls src={audioUrl} />
-                    <a href={audioUrl} download="podcast-session.webm" className="download-link">
-                      音声ファイルを保存
-                    </a>
-                  </>
-                ) : (
-                  <p className="placeholder">まだ保存可能な音声はありません。</p>
-                )}
               </div>
-              <div className="summary-box">
-                <p className="summary-label">Transcript snapshot</p>
-                <p>{transcriptText || 'まだ発話はありません。'}</p>
-              </div>
+              {isNotesOpen ? (
+                <>
+                  <div className="audio-box">
+                    <div className="audio-copy">
+                      <p className="summary-label">Audio export</p>
+                      <p>{audioUrl ? '収録音声を確認して保存できます。' : '録音停止後に音声を書き出せます。'}</p>
+                    </div>
+                    {audioUrl ? (
+                      <>
+                        <audio controls src={audioUrl} />
+                        <a href={audioUrl} download="podcast-session.webm" className="download-link">
+                          音声ファイルを保存
+                        </a>
+                      </>
+                    ) : (
+                      <p className="placeholder">まだ保存可能な音声はありません。</p>
+                    )}
+                  </div>
+                  <div className="summary-box">
+                    <p className="summary-label">Transcript snapshot</p>
+                    <p>{transcriptText || 'まだ発話はありません。'}</p>
+                  </div>
+                </>
+              ) : null}
             </section>
           </section>
         </section>
       </div>
     </main>
-  )
-}
-
-function StatusPill({
-  label,
-  value,
-  active = false,
-}: {
-  label: string
-  value: string
-  active?: boolean
-}) {
-  return (
-    <article className={`status-pill ${active ? 'is-active' : ''}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
   )
 }
 

@@ -20,6 +20,14 @@
   margin-bottom: 18px;
 }
 
+.app-bar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .app-brand {
   display: flex;
   align-items: center;
@@ -34,7 +42,6 @@
 }
 
 .app-brand h1,
-.video-heading h3,
 .panel-heading h3,
 .chat-header h3,
 .hero-copy h2 {
@@ -51,9 +58,7 @@
 .helper-copy,
 .placeholder,
 .audio-copy p:last-child,
-.video-heading p,
 .chat-count,
-.meta-stats,
 .chat-meta,
 .transcript-item time,
 .summary-label {
@@ -104,11 +109,9 @@
 }
 
 .player-card,
-.video-meta,
 .side-card,
 .transcript-panel,
-.notes-panel,
-.control-strip {
+.notes-panel {
   border: 1px solid var(--border-soft);
   border-radius: 18px;
   background: #fff;
@@ -116,7 +119,6 @@
 }
 
 .player-card,
-.video-meta,
 .side-card,
 .transcript-panel,
 .notes-panel {
@@ -229,7 +231,6 @@
   line-height: 1.6;
 }
 
-.video-heading,
 .panel-heading,
 .chat-header {
   display: flex;
@@ -238,55 +239,58 @@
   gap: 12px;
 }
 
-.video-heading p,
 .panel-subtle {
   margin-top: 4px;
 }
 
-.meta-stats {
+.panel-heading-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  font-size: 0.84rem;
-}
-
-.status-strip {
-  margin-top: 14px;
-  display: flex;
-  flex-wrap: wrap;
   gap: 10px;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-soft);
-  background: var(--surface-subtle);
-  font-size: 0.85rem;
-}
-
-.status-pill span {
-  color: var(--text-secondary);
-}
-
-.status-pill strong {
-  font-size: 0.88rem;
-}
-
-.status-pill.is-active {
-  border-color: #ffd2cf;
-  background: #fff5f5;
-  color: #d93025;
 }
 
 .chat-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.icon-button {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: #fff;
+  color: #d93025;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #ffb8b2;
+  background: #fff5f5;
+}
+
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-button.is-spinning svg {
+  animation: spin 0.85s linear infinite;
 }
 
 .chat-list,
@@ -355,15 +359,6 @@
   font-size: 0.84rem;
 }
 
-.control-strip {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  flex-wrap: wrap;
-}
-
 .controls {
   display: flex;
   gap: 10px;
@@ -373,14 +368,29 @@
 .control-button,
 .download-link {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  padding: 11px 15px;
+  height: 38px;
+  padding: 0 15px;
   font-weight: 700;
   color: var(--text-primary);
   background: #fff;
   cursor: pointer;
   text-decoration: none;
+}
+
+.panel-toggle {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .control-button.primary {
@@ -405,24 +415,10 @@
   padding: 8px;
 }
 
-.ticker-head {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #feeceb;
-  color: #c5221f;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
 .ticker-track {
   display: flex;
   gap: 26px;
-  padding-inline: 16px;
+  padding-inline: 8px;
   white-space: nowrap;
   color: var(--text-secondary);
   animation: marquee 24s linear infinite;
@@ -443,6 +439,14 @@
   gap: 18px;
 }
 
+.collapsible-panel {
+  align-content: start;
+}
+
+.collapsible-panel:not(.is-open) {
+  gap: 0;
+}
+
 .placeholder {
   line-height: 1.6;
 }
@@ -454,6 +458,16 @@
 
   to {
     transform: translateX(-50%);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -474,10 +488,10 @@
   }
 
   .app-bar,
+  .app-bar-actions,
   .video-heading,
   .panel-heading,
-  .chat-header,
-  .control-strip {
+  .chat-header {
     flex-direction: column;
     align-items: flex-start;
   }
