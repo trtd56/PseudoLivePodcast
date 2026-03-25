@@ -61,6 +61,7 @@ const COMMENTARY_FLUSH_INTERVAL_MS = 10000
 const COMMENTARY_BATCH_SIZE = 1
 const MAX_CHAT_MESSAGES = 18
 const MAX_TRANSCRIPT_ENTRIES = 24
+const IS_CAMERA_PREVIEW_MIRRORED = true
 
 function getSupportedMimeType(mimeTypes: string[]) {
   return mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? ''
@@ -115,7 +116,6 @@ function App() {
   const [audioPreviewMimeType, setAudioPreviewMimeType] = useState<string>('')
   const [cameraError, setCameraError] = useState('')
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
-  const [downloadFormat, setDownloadFormat] = useState<'video' | 'audio'>('video')
   const [queuedCommentCount, setQueuedCommentCount] = useState(0)
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false)
   const [isNotesOpen, setIsNotesOpen] = useState(false)
@@ -506,7 +506,7 @@ function App() {
         context.save()
         clipRoundedRect(context, x, y, width, height, radius)
         context.clip()
-        drawVideoCover(context, preview, x, y, width, height)
+        drawVideoCover(context, preview, x, y, width, height, IS_CAMERA_PREVIEW_MIRRORED)
         context.restore()
       }
     } finally {
@@ -645,7 +645,6 @@ function App() {
       mediaRecorderRef.current = recorder
       audioRecorderRef.current = audioRecorder
       setRecordingStartedAt(Date.now())
-      setDownloadFormat('video')
       setStatus('アプリ画面を収録中')
       return true
     } catch (error) {
@@ -665,31 +664,31 @@ function App() {
     setStatus('収録停止')
   }
 
-  const selectedDownload = downloadFormat === 'audio'
-    ? {
-        blob: audioRecordingBlob,
-        filename: 'podcast-session-audio.wav',
-        label: '音声ファイルを保存',
-      }
-    : {
-        blob: recordingBlob,
-        filename: `podcast-session.${getExtensionFromMimeType(recordingMimeType, 'webm')}`,
-        label: '動画ファイルを保存',
-      }
-
   const canDownloadAudio = Boolean(audioRecordingBlob)
   const canDownloadVideo = Boolean(recordingBlob)
 
-  const handleDownload = () => {
-    if (!selectedDownload.blob) {
-      setStatus('選択した形式はまだ保存できません')
+  const handleDownload = (target: 'video' | 'audio') => {
+    const downloadTarget = target === 'audio'
+      ? {
+          blob: audioRecordingBlob,
+          filename: 'podcast-session-audio.wav',
+          unavailableMessage: '音声ファイルはまだ保存できません',
+        }
+      : {
+          blob: recordingBlob,
+          filename: `podcast-session.${getExtensionFromMimeType(recordingMimeType, 'webm')}`,
+          unavailableMessage: '動画ファイルはまだ保存できません',
+        }
+
+    if (!downloadTarget.blob) {
+      setStatus(downloadTarget.unavailableMessage)
       return
     }
 
-    const downloadUrl = URL.createObjectURL(selectedDownload.blob)
+    const downloadUrl = URL.createObjectURL(downloadTarget.blob)
     const link = document.createElement('a')
     link.href = downloadUrl
-    link.download = selectedDownload.filename
+    link.download = downloadTarget.filename
     link.rel = 'noopener'
     document.body.append(link)
     link.click()
@@ -740,7 +739,7 @@ function App() {
               className="control-button primary"
               onClick={isListening || recordingStartedAt ? () => stopSession() : () => void startSession()}
             >
-              {isListening || recordingStartedAt ? '音声認識と収録を停止' : '音声認識と収録を開始'}
+              {isListening || recordingStartedAt ? '音声認識と収録を停止' : '開始'}
             </button>
             <div className="app-status">
               <span className={`dot ${recordingStartedAt ? 'is-live' : ''}`} />
@@ -923,7 +922,7 @@ function App() {
                       <p className="summary-label">Media export</p>
                       <p>
                         {recordingUrl || audioRecordingUrl
-                          ? '収録した動画または音声を選んで保存できます。'
+                          ? '動画と音声をそれぞれワンアクションで保存できます。'
                           : '収録停止後に動画と音声を書き出せます。'}
                       </p>
                     </div>
@@ -935,33 +934,27 @@ function App() {
                             <source src={audioRecordingUrl} type={audioPreviewMimeType || undefined} />
                           </audio>
                         ) : null}
-                        <div className="download-format-picker" role="radiogroup" aria-label="保存する形式">
+                        <div className="download-actions" aria-label="保存する形式">
                           <button
                             type="button"
-                            className={`format-chip ${downloadFormat === 'video' ? 'is-active' : ''}`}
-                            onClick={() => setDownloadFormat('video')}
+                            className="download-link"
+                            onClick={() => handleDownload('video')}
                             disabled={!canDownloadVideo}
-                            aria-pressed={downloadFormat === 'video'}
                           >
-                            動画
+                            動画ファイルを保存
                           </button>
                           <button
                             type="button"
-                            className={`format-chip ${downloadFormat === 'audio' ? 'is-active' : ''}`}
-                            onClick={() => setDownloadFormat('audio')}
+                            className="download-link"
+                            onClick={() => handleDownload('audio')}
                             disabled={!canDownloadAudio}
-                            aria-pressed={downloadFormat === 'audio'}
                           >
-                            音声
+                            音声ファイルを保存
                           </button>
                         </div>
-                        {selectedDownload.blob ? (
-                          <button type="button" onClick={handleDownload} className="download-link">
-                            {selectedDownload.label}
-                          </button>
-                        ) : (
-                          <p className="placeholder">選択した形式はまだ保存できません。</p>
-                        )}
+                        {!canDownloadVideo && !canDownloadAudio ? (
+                          <p className="placeholder">保存できる動画・音声はまだありません。</p>
+                        ) : null}
                       </>
                     ) : (
                       <p className="placeholder">まだ保存可能な動画・音声はありません。</p>
@@ -1108,6 +1101,7 @@ function drawVideoCover(
   y: number,
   width: number,
   height: number,
+  mirrorHorizontally = false,
 ) {
   const videoAspectRatio = video.videoWidth / video.videoHeight
   const frameAspectRatio = width / height
@@ -1123,6 +1117,15 @@ function drawVideoCover(
   } else {
     sourceHeight = video.videoWidth / frameAspectRatio
     sourceY = (video.videoHeight - sourceHeight) / 2
+  }
+
+  if (mirrorHorizontally) {
+    context.save()
+    context.translate(x + width, y)
+    context.scale(-1, 1)
+    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height)
+    context.restore()
+    return
   }
 
   context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height)

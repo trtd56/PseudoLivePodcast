@@ -417,6 +417,12 @@
   border-color: #d2e3fc;
 }
 
+.control-button:disabled,
+.download-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .ticker {
   min-width: 0;
   display: flex;
@@ -472,6 +478,10 @@
   object-fit: cover;
 }
 
+.camera-preview {
+  transform: scaleX(-1);
+}
+
 .camera-placeholder {
   display: grid;
   place-items: center;
@@ -507,37 +517,10 @@
   gap: 12px;
 }
 
-.download-format-picker {
+.download-actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-}
-
-.format-chip {
-  appearance: none;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  min-height: 40px;
-  padding: 8px 14px;
-  background: #fff;
-  color: var(--text-primary);
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease;
-}
-
-.format-chip.is-active {
-  color: #d93025;
-  background: #fff5f5;
-  border-color: #ffd2cf;
-}
-
-.format-chip:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .audio-box audio,
