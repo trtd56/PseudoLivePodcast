@@ -77,6 +77,7 @@ function getExtensionFromMimeType(mimeType: string, fallback: string) {
 function App() {
   const speechCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition
   const appShellRef = useRef<HTMLDivElement | null>(null)
+  const cameraPreviewRef = useRef<HTMLVideoElement | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const chatListRef = useRef<HTMLDivElement | null>(null)
   const lastPromptAtRef = useRef(0)
@@ -88,12 +89,17 @@ function App() {
   const audioRecordingChunksRef = useRef<Blob[]>([])
   const micStreamRef = useRef<MediaStream | null>(null)
   const videoStreamRef = useRef<MediaStream | null>(null)
+  const cameraStreamRef = useRef<MediaStream | null>(null)
+  const recordingUrlRef = useRef('')
+  const audioRecordingUrlRef = useRef('')
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const renderIntervalRef = useRef<number | null>(null)
   const isRenderingFrameRef = useRef(false)
 
   const [isListening, setIsListening] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false)
+  const [isCameraLoading, setIsCameraLoading] = useState(false)
   const [status, setStatus] = useState('待機中')
   const [interimText, setInterimText] = useState('')
   const [segmentTitle, setSegmentTitle] = useState('オープニング')
@@ -107,9 +113,10 @@ function App() {
   const [audioRecordingBlob, setAudioRecordingBlob] = useState<Blob | null>(null)
   const [audioRecordingUrl, setAudioRecordingUrl] = useState<string>('')
   const [audioPreviewMimeType, setAudioPreviewMimeType] = useState<string>('')
+  const [cameraError, setCameraError] = useState('')
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [downloadFormat, setDownloadFormat] = useState<'video' | 'audio'>('video')
   const [queuedCommentCount, setQueuedCommentCount] = useState(0)
-  const isCameraEnabled = false
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false)
   const [isNotesOpen, setIsNotesOpen] = useState(false)
 
@@ -121,23 +128,56 @@ function App() {
   )
 
   useEffect(() => {
+    recordingUrlRef.current = recordingUrl
+  }, [recordingUrl])
+
+  useEffect(() => {
+    audioRecordingUrlRef.current = audioRecordingUrl
+  }, [audioRecordingUrl])
+
+  useEffect(() => {
     return () => {
       recognitionRef.current?.stop()
       mediaRecorderRef.current?.stop()
       audioRecorderRef.current?.stop()
       micStreamRef.current?.getTracks().forEach((track) => track.stop())
       videoStreamRef.current?.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
       if (renderIntervalRef.current !== null) {
         window.clearInterval(renderIntervalRef.current)
       }
-      if (recordingUrl) {
-        URL.revokeObjectURL(recordingUrl)
+      if (recordingUrlRef.current) {
+        URL.revokeObjectURL(recordingUrlRef.current)
       }
-      if (audioRecordingUrl) {
-        URL.revokeObjectURL(audioRecordingUrl)
+      if (audioRecordingUrlRef.current) {
+        URL.revokeObjectURL(audioRecordingUrlRef.current)
       }
     }
-  }, [audioRecordingUrl, recordingUrl])
+  }, [])
+
+  useEffect(() => {
+    const preview = cameraPreviewRef.current
+    if (!preview) return
+
+    if (!cameraStream) {
+      preview.pause()
+      preview.srcObject = null
+      return
+    }
+
+    preview.srcObject = cameraStream
+    preview.muted = true
+    preview.playsInline = true
+
+    void preview.play().catch((error) => {
+      console.error(error)
+    })
+
+    return () => {
+      preview.pause()
+      preview.srcObject = null
+    }
+  }, [cameraStream, isCameraEnabled])
 
   useEffect(() => {
     const node = chatListRef.current
@@ -314,6 +354,72 @@ function App() {
     setStatus('停止中')
   }
 
+  const stopCamera = () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+    cameraStreamRef.current = null
+    setCameraStream(null)
+    setIsCameraEnabled(false)
+    setIsCameraLoading(false)
+    setCameraError('')
+  }
+
+  const startCamera = async () => {
+    if (cameraStreamRef.current) {
+      setCameraError('')
+      setIsCameraEnabled(true)
+      return true
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('このブラウザではPCカメラ取得に対応していません。')
+      return false
+    }
+
+    setIsCameraLoading(true)
+    setCameraError('')
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      })
+
+      for (const track of stream.getVideoTracks()) {
+        track.onended = () => {
+          cameraStreamRef.current = null
+          setCameraStream(null)
+          setIsCameraEnabled(false)
+          setCameraError('カメラが切断されたため映像表示を停止しました。')
+        }
+      }
+
+      cameraStreamRef.current = stream
+      setCameraStream(stream)
+      setIsCameraEnabled(true)
+      return true
+    } catch (error) {
+      console.error(error)
+      setCameraError('PCカメラを開始できませんでした。ブラウザの権限設定を確認してください。')
+      setIsCameraEnabled(false)
+      return false
+    } finally {
+      setIsCameraLoading(false)
+    }
+  }
+
+  const toggleCamera = () => {
+    if (isCameraEnabled) {
+      stopCamera()
+      return
+    }
+
+    void startCamera()
+  }
+
   const stopCaptureStreams = () => {
     micStreamRef.current?.getTracks().forEach((track) => track.stop())
     videoStreamRef.current?.getTracks().forEach((track) => track.stop())
@@ -377,6 +483,32 @@ function App() {
 
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.drawImage(snapshot, 0, 0)
+
+      const preview = cameraPreviewRef.current
+      if (
+        isCameraEnabled
+        && preview
+        && preview.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+        && preview.videoWidth > 0
+        && preview.videoHeight > 0
+      ) {
+        const targetRect = target.getBoundingClientRect()
+        const previewRect = preview.getBoundingClientRect()
+        const scaleX = canvas.width / targetRect.width
+        const scaleY = canvas.height / targetRect.height
+        const x = (previewRect.left - targetRect.left) * scaleX
+        const y = (previewRect.top - targetRect.top) * scaleY
+        const width = previewRect.width * scaleX
+        const height = previewRect.height * scaleY
+        const cssRadius = Number.parseFloat(window.getComputedStyle(preview).borderTopLeftRadius) || 0
+        const radius = cssRadius * scaleX
+
+        context.save()
+        clipRoundedRect(context, x, y, width, height, radius)
+        context.clip()
+        drawVideoCover(context, preview, x, y, width, height)
+        context.restore()
+      }
     } finally {
       isRenderingFrameRef.current = false
     }
@@ -597,6 +729,14 @@ function App() {
           </div>
           <div className="app-bar-actions">
             <button
+              className={`control-button ${isCameraEnabled ? 'is-toggled' : ''}`}
+              type="button"
+              onClick={toggleCamera}
+              disabled={isCameraLoading}
+            >
+              {isCameraLoading ? 'カメラを起動中...' : isCameraEnabled ? 'カメラをオフ' : 'カメラをオン'}
+            </button>
+            <button
               className="control-button primary"
               onClick={isListening || recordingStartedAt ? () => stopSession() : () => void startSession()}
             >
@@ -620,10 +760,36 @@ function App() {
                       <StatusIcon kind="live" active={Boolean(recordingStartedAt)} label={recordingStartedAt ? 'ライブ中' : '待機中'} />
                       <StatusIcon kind="mic" active={isListening} label={isListening ? 'マイク入力中' : 'マイク停止'} />
                       <StatusIcon kind="spark" active={isGenerating} label={isGenerating ? 'AI生成中' : 'AI待機'} />
-                      {isCameraEnabled ? <StatusIcon kind="camera" active label="カメラ有効" /> : null}
+                      <StatusIcon kind="camera" active={isCameraEnabled} label={isCameraEnabled ? 'カメラ有効' : 'カメラ停止'} />
                     </div>
                     <span className="elapsed-badge">{elapsed}</span>
                   </div>
+
+                  {isCameraEnabled || isCameraLoading || cameraError ? (
+                    <>
+                      <div className="camera-stage">
+                        {isCameraEnabled ? (
+                          <video
+                            ref={cameraPreviewRef}
+                            className="camera-preview"
+                            autoPlay
+                            muted
+                            playsInline
+                          />
+                        ) : (
+                          <div className="camera-placeholder">
+                            <div className="camera-placeholder-copy">
+                              <span className={`camera-badge ${isCameraEnabled ? 'is-live' : ''}`}>
+                                {isCameraLoading ? 'CAM BOOT' : 'CAM OFF'}
+                              </span>
+                              <p>{isCameraLoading ? 'カメラを起動しています。' : cameraError}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="player-visual-overlay" aria-hidden="true" />
+                    </>
+                  ) : null}
 
                   <div className="hero-copy">
                     <h2>{segmentTitle}</h2>
@@ -910,6 +1076,56 @@ function writeAscii(view: DataView, offset: number, value: string) {
   for (let index = 0; index < value.length; index += 1) {
     view.setUint8(offset + index, value.charCodeAt(index))
   }
+}
+
+function clipRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.min(radius, width / 2, height / 2)
+
+  context.beginPath()
+  context.moveTo(x + safeRadius, y)
+  context.lineTo(x + width - safeRadius, y)
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius)
+  context.lineTo(x + width, y + height - safeRadius)
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height)
+  context.lineTo(x + safeRadius, y + height)
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius)
+  context.lineTo(x, y + safeRadius)
+  context.quadraticCurveTo(x, y, x + safeRadius, y)
+  context.closePath()
+}
+
+function drawVideoCover(
+  context: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const videoAspectRatio = video.videoWidth / video.videoHeight
+  const frameAspectRatio = width / height
+
+  let sourceX = 0
+  let sourceY = 0
+  let sourceWidth = video.videoWidth
+  let sourceHeight = video.videoHeight
+
+  if (videoAspectRatio > frameAspectRatio) {
+    sourceWidth = video.videoHeight * frameAspectRatio
+    sourceX = (video.videoWidth - sourceWidth) / 2
+  } else {
+    sourceHeight = video.videoWidth / frameAspectRatio
+    sourceY = (video.videoHeight - sourceHeight) / 2
+  }
+
+  context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height)
 }
 
 export default App

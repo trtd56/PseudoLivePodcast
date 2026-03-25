@@ -141,7 +141,7 @@
 .player-chrome,
 .hero-copy {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .player-chrome {
@@ -403,6 +403,12 @@
   border-color: #ffd2cf;
 }
 
+.control-button.is-toggled {
+  color: #0f5132;
+  background: #edf9f1;
+  border-color: #b7e1c0;
+}
+
 .download-link {
   display: inline-flex;
   justify-content: center;
@@ -417,6 +423,74 @@
   align-items: center;
   overflow: hidden;
   padding: 8px;
+}
+
+.camera-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.player-visual-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.14) 34%, rgba(0, 0, 0, 0.46)),
+    radial-gradient(circle at 18% 0, rgba(255, 255, 255, 0.12), transparent 20%);
+}
+
+.camera-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.camera-badge.is-live {
+  background: rgba(255, 49, 49, 0.92);
+}
+
+.camera-preview,
+.camera-placeholder {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.2), transparent 28%),
+    linear-gradient(135deg, rgba(54, 54, 54, 0.92), rgba(10, 10, 10, 0.96));
+  object-fit: cover;
+}
+
+.camera-placeholder {
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+
+.camera-placeholder-copy {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  max-width: 34ch;
+}
+
+.camera-placeholder p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  text-align: center;
 }
 
 .ticker-track {
@@ -657,6 +731,10 @@
 
   .player-chrome {
     padding: 12px;
+  }
+
+  .camera-placeholder {
+    padding: 22px;
   }
 
   .elapsed-badge {
