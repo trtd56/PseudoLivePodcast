@@ -8,7 +8,8 @@
 
 .app-shell {
   width: 100%;
-  margin: 0;
+  max-width: 1440px;
+  margin: 0 auto;
   padding: 24px;
 }
 
@@ -72,6 +73,7 @@
   gap: 10px;
   min-height: 38px;
   padding: 0 14px;
+  flex-wrap: wrap;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
   background: #fff;
@@ -373,9 +375,11 @@
   justify-content: center;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  height: 38px;
-  padding: 0 15px;
+  min-height: 44px;
+  padding: 10px 15px;
   font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
   color: var(--text-primary);
   background: #fff;
   cursor: pointer;
@@ -429,8 +433,48 @@
   gap: 12px;
 }
 
-.audio-box audio {
+.download-format-picker {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.format-chip {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 8px 14px;
+  background: #fff;
+  color: var(--text-primary);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.format-chip.is-active {
+  color: #d93025;
+  background: #fff5f5;
+  border-color: #ffd2cf;
+}
+
+.format-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.audio-box audio,
+.recording-preview {
   width: 100%;
+}
+
+.recording-preview {
+  border-radius: 12px;
+  background: #000;
+  aspect-ratio: 16 / 9;
 }
 
 .bottom-grid {
@@ -484,23 +528,143 @@
 
 @media (max-width: 760px) {
   .app-shell {
-    padding: 16px;
+    padding: 14px;
   }
 
   .app-bar,
   .app-bar-actions,
-  .video-heading,
   .panel-heading,
   .chat-header {
     flex-direction: column;
     align-items: flex-start;
   }
 
+  .app-bar {
+    gap: 12px;
+  }
+
+  .app-brand {
+    gap: 12px;
+  }
+
+  .app-bar-actions,
+  .chat-actions,
+  .panel-heading-actions {
+    width: 100%;
+  }
+
+  .app-bar-actions {
+    gap: 10px;
+  }
+
+  .app-bar-actions > * {
+    width: 100%;
+  }
+
+  .app-status,
+  .control-button,
+  .panel-toggle,
+  .download-link {
+    width: 100%;
+  }
+
+  .app-status {
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 18px;
+  }
+
+  .player-card,
+  .side-card,
+  .transcript-panel,
+  .notes-panel {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
   .player-visual {
-    min-height: min(56vh, 460px);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: min(62vh, 520px);
   }
 
   .hero-copy {
+    position: static;
+    inset: auto;
     max-width: none;
+    padding: 0 14px 14px;
+  }
+
+  .hero-copy h2 {
+    font-size: clamp(1.7rem, 9vw, 2.5rem);
+  }
+
+  .hero-meta {
+    font-size: 0.95rem;
+  }
+
+  .player-chrome {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .status-icons {
+    flex-wrap: wrap;
+  }
+
+  .chat-actions,
+  .panel-heading-actions {
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-list {
+    max-height: min(44vh, 420px);
+  }
+
+  .transcript-list {
+    max-height: 240px;
+  }
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .app-brand h1 {
+    font-size: 0.95rem;
+  }
+
+  .app-brand p,
+  .panel-subtle,
+  .chat-count,
+  .chat-meta,
+  .summary-label {
+    font-size: 0.85rem;
+  }
+
+  .player-visual {
+    min-height: 420px;
+  }
+
+  .player-chrome {
+    padding: 12px;
+  }
+
+  .elapsed-badge {
+    width: 100%;
+    text-align: center;
+  }
+
+  .quote-box {
+    padding: 12px 14px;
   }
 }

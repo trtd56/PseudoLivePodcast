@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import html2canvas from 'html2canvas'
 import './App.css'
 
 type GeneratedComment = {
@@ -61,16 +62,35 @@ const COMMENTARY_BATCH_SIZE = 1
 const MAX_CHAT_MESSAGES = 18
 const MAX_TRANSCRIPT_ENTRIES = 24
 
+function getSupportedMimeType(mimeTypes: string[]) {
+  return mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? ''
+}
+
+function getExtensionFromMimeType(mimeType: string, fallback: string) {
+  if (mimeType.includes('mp4')) return 'mp4'
+  if (mimeType.includes('quicktime')) return 'mov'
+  if (mimeType.includes('webm')) return 'webm'
+  if (mimeType.includes('ogg')) return 'ogg'
+  return fallback
+}
+
 function App() {
   const speechCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition
+  const appShellRef = useRef<HTMLDivElement | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const chatListRef = useRef<HTMLDivElement | null>(null)
   const lastPromptAtRef = useRef(0)
   const spokenWindowRef = useRef('')
   const pendingCommentsRef = useRef<GeneratedComment[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const captureStreamRef = useRef<MediaStream | null>(null)
+  const audioRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+  const audioRecordingChunksRef = useRef<Blob[]>([])
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const videoStreamRef = useRef<MediaStream | null>(null)
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const renderIntervalRef = useRef<number | null>(null)
+  const isRenderingFrameRef = useRef(false)
 
   const [isListening, setIsListening] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -81,7 +101,13 @@ function App() {
   const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null)
-  const [audioUrl, setAudioUrl] = useState<string>('')
+  const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null)
+  const [recordingUrl, setRecordingUrl] = useState<string>('')
+  const [recordingMimeType, setRecordingMimeType] = useState<string>('')
+  const [audioRecordingBlob, setAudioRecordingBlob] = useState<Blob | null>(null)
+  const [audioRecordingUrl, setAudioRecordingUrl] = useState<string>('')
+  const [audioPreviewMimeType, setAudioPreviewMimeType] = useState<string>('')
+  const [downloadFormat, setDownloadFormat] = useState<'video' | 'audio'>('video')
   const [queuedCommentCount, setQueuedCommentCount] = useState(0)
   const isCameraEnabled = false
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false)
@@ -98,12 +124,20 @@ function App() {
     return () => {
       recognitionRef.current?.stop()
       mediaRecorderRef.current?.stop()
-      captureStreamRef.current?.getTracks().forEach((track) => track.stop())
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl)
+      audioRecorderRef.current?.stop()
+      micStreamRef.current?.getTracks().forEach((track) => track.stop())
+      videoStreamRef.current?.getTracks().forEach((track) => track.stop())
+      if (renderIntervalRef.current !== null) {
+        window.clearInterval(renderIntervalRef.current)
+      }
+      if (recordingUrl) {
+        URL.revokeObjectURL(recordingUrl)
+      }
+      if (audioRecordingUrl) {
+        URL.revokeObjectURL(audioRecordingUrl)
       }
     }
-  }, [audioUrl])
+  }, [audioRecordingUrl, recordingUrl])
 
   useEffect(() => {
     const node = chatListRef.current
@@ -280,74 +314,279 @@ function App() {
     setStatus('停止中')
   }
 
-  const startAudioCapture = async () => {
+  const stopCaptureStreams = () => {
+    micStreamRef.current?.getTracks().forEach((track) => track.stop())
+    videoStreamRef.current?.getTracks().forEach((track) => track.stop())
+    micStreamRef.current = null
+    videoStreamRef.current = null
+    captureCanvasRef.current = null
+    isRenderingFrameRef.current = false
+
+    if (renderIntervalRef.current !== null) {
+      window.clearInterval(renderIntervalRef.current)
+      renderIntervalRef.current = null
+    }
+  }
+
+  const getVideoRecordingMimeType = () => {
+    return getSupportedMimeType([
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a',
+      'video/mp4',
+      'video/quicktime;codecs=h264,aac',
+      'video/quicktime',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+    ])
+  }
+
+  const getAudioRecordingMimeType = () => {
+    return getSupportedMimeType([
+      'audio/webm;codecs=opus',
+      'audio/webm',
+    ])
+  }
+
+  const renderAppFrame = async () => {
+    const target = appShellRef.current
+    const canvas = captureCanvasRef.current
+
+    if (!target || !canvas || isRenderingFrameRef.current) {
+      return
+    }
+
+    isRenderingFrameRef.current = true
+
+    try {
+      const snapshot = await html2canvas(target, {
+        backgroundColor: null,
+        useCORS: true,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+      })
+
+      if (canvas.width !== snapshot.width || canvas.height !== snapshot.height) {
+        canvas.width = snapshot.width
+        canvas.height = snapshot.height
+      }
+
+      const context = canvas.getContext('2d')
+      if (!context) {
+        throw new Error('Canvas context is not available')
+      }
+
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(snapshot, 0, 0)
+    } finally {
+      isRenderingFrameRef.current = false
+    }
+  }
+
+  const startVideoCapture = async () => {
     if (mediaRecorderRef.current) {
       return true
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      captureStreamRef.current = stream
-      audioChunksRef.current = []
+      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const target = appShellRef.current
 
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      if (!target) {
+        micStream.getTracks().forEach((track) => track.stop())
+        setStatus('録画対象の画面を取得できませんでした')
+        return false
+      }
+
+      const snapshot = await html2canvas(target, {
+        backgroundColor: null,
+        useCORS: true,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+      })
+      const captureCanvas = document.createElement('canvas')
+      captureCanvas.width = snapshot.width
+      captureCanvas.height = snapshot.height
+
+      const captureContext = captureCanvas.getContext('2d')
+      if (!captureContext) {
+        micStream.getTracks().forEach((track) => track.stop())
+        setStatus('録画用キャンバスを初期化できませんでした')
+        return false
+      }
+
+      captureContext.drawImage(snapshot, 0, 0)
+      const stream = captureCanvas.captureStream(12)
+      const videoTrack = stream.getVideoTracks()[0]
+      const micTrack = micStream.getAudioTracks()[0]
+
+      if (!videoTrack || !micTrack) {
+        stream.getTracks().forEach((track) => track.stop())
+        micStream.getTracks().forEach((track) => track.stop())
+        setStatus('映像またはマイクを取得できませんでした')
+        return false
+      }
+
+      micStreamRef.current = micStream
+      videoStreamRef.current = stream
+      captureCanvasRef.current = captureCanvas
+      recordingChunksRef.current = []
+      audioRecordingChunksRef.current = []
+      setRecordingBlob(null)
+      setRecordingMimeType('')
+      setAudioRecordingBlob(null)
+      setAudioPreviewMimeType('')
+
+      const combinedStream = new MediaStream([videoTrack, micTrack])
+      const videoMimeType = getVideoRecordingMimeType()
+      const audioMimeType = getAudioRecordingMimeType()
+      const recorder = videoMimeType ? new MediaRecorder(combinedStream, { mimeType: videoMimeType }) : new MediaRecorder(combinedStream)
+      const audioRecorder = audioMimeType ? new MediaRecorder(micStream, { mimeType: audioMimeType }) : new MediaRecorder(micStream)
+
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
+          recordingChunksRef.current.push(event.data)
         }
-      }
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        if (audioUrl) {
-          URL.revokeObjectURL(audioUrl)
-        }
-        const nextUrl = URL.createObjectURL(blob)
-        setAudioUrl(nextUrl)
-        captureStreamRef.current?.getTracks().forEach((track) => track.stop())
       }
 
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, {
+          type: videoMimeType || 'video/webm',
+        })
+
+        if (recordingUrl) {
+          URL.revokeObjectURL(recordingUrl)
+        }
+
+        const nextUrl = URL.createObjectURL(blob)
+        setRecordingBlob(blob)
+        setRecordingUrl(nextUrl)
+        setRecordingMimeType(blob.type || videoMimeType || 'video/webm')
+      }
+
+      audioRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioRecordingChunksRef.current.push(event.data)
+        }
+      }
+
+      audioRecorder.onstop = () => {
+        const sourceBlob = new Blob(audioRecordingChunksRef.current, {
+          type: audioMimeType || 'audio/webm',
+        })
+
+        void (async () => {
+          try {
+            setStatus('音声を WAV に変換中')
+            const blob = await convertAudioBlobToWav(sourceBlob)
+
+            if (audioRecordingUrl) {
+              URL.revokeObjectURL(audioRecordingUrl)
+            }
+
+            const nextUrl = URL.createObjectURL(blob)
+            setAudioRecordingBlob(blob)
+            setAudioRecordingUrl(nextUrl)
+            setAudioPreviewMimeType(blob.type)
+          } catch (error) {
+            console.error(error)
+
+            if (audioRecordingUrl) {
+              URL.revokeObjectURL(audioRecordingUrl)
+            }
+
+            const nextUrl = URL.createObjectURL(sourceBlob)
+            setAudioRecordingBlob(sourceBlob)
+            setAudioRecordingUrl(nextUrl)
+            setAudioPreviewMimeType(sourceBlob.type)
+            setStatus('WAV 変換に失敗したため元の音声を保持')
+          } finally {
+            stopCaptureStreams()
+          }
+        })()
+      }
+
+      renderIntervalRef.current = window.setInterval(() => {
+        void renderAppFrame()
+      }, 250)
+
       recorder.start()
+      audioRecorder.start()
       mediaRecorderRef.current = recorder
+      audioRecorderRef.current = audioRecorder
       setRecordingStartedAt(Date.now())
-      setStatus('収録中')
+      setDownloadFormat('video')
+      setStatus('アプリ画面を収録中')
       return true
     } catch (error) {
       console.error(error)
-      setStatus('マイク録音を開始できませんでした')
-      return
+      stopCaptureStreams()
+      setStatus('アプリ画面の収録を開始できませんでした')
+      return false
     }
-    return false
   }
 
-  const stopAudioCapture = () => {
+  const stopVideoCapture = () => {
     mediaRecorderRef.current?.stop()
+    audioRecorderRef.current?.stop()
     mediaRecorderRef.current = null
+    audioRecorderRef.current = null
     setRecordingStartedAt(null)
     setStatus('収録停止')
   }
 
+  const selectedDownload = downloadFormat === 'audio'
+    ? {
+        blob: audioRecordingBlob,
+        filename: 'podcast-session-audio.wav',
+        label: '音声ファイルを保存',
+      }
+    : {
+        blob: recordingBlob,
+        filename: `podcast-session.${getExtensionFromMimeType(recordingMimeType, 'webm')}`,
+        label: '動画ファイルを保存',
+      }
+
+  const canDownloadAudio = Boolean(audioRecordingBlob)
+  const canDownloadVideo = Boolean(recordingBlob)
+
+  const handleDownload = () => {
+    if (!selectedDownload.blob) {
+      setStatus('選択した形式はまだ保存できません')
+      return
+    }
+
+    const downloadUrl = URL.createObjectURL(selectedDownload.blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = selectedDownload.filename
+    link.rel = 'noopener'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
+  }
+
   const startSession = async () => {
-    const didStartCapture = await startAudioCapture()
+    const didStartCapture = await startVideoCapture()
     if (!didStartCapture) return
 
     const didStartListening = await startListening()
     if (!didStartListening) {
-      stopAudioCapture()
+      stopVideoCapture()
       return
     }
 
     setStatus('収録と音声認識を開始')
   }
 
-  const stopSession = () => {
+  const stopSession = (nextStatus = '収録と音声認識を停止') => {
     stopListening()
-    stopAudioCapture()
-    setStatus('収録と音声認識を停止')
+    stopVideoCapture()
+    setStatus(nextStatus)
   }
 
   return (
     <main className="studio-shell">
-      <div className="app-shell">
+      <div className="app-shell" ref={appShellRef}>
         <header className="app-bar">
           <div className="app-brand">
             <div className="brand-mark" aria-hidden="true" />
@@ -359,9 +598,9 @@ function App() {
           <div className="app-bar-actions">
             <button
               className="control-button primary"
-              onClick={isListening || recordingStartedAt ? stopSession : startSession}
+              onClick={isListening || recordingStartedAt ? () => stopSession() : () => void startSession()}
             >
-              {isListening || recordingStartedAt ? '音声認識と録音を停止' : '音声認識と録音を開始'}
+              {isListening || recordingStartedAt ? '音声認識と収録を停止' : '音声認識と収録を開始'}
             </button>
             <div className="app-status">
               <span className={`dot ${recordingStartedAt ? 'is-live' : ''}`} />
@@ -515,18 +754,51 @@ function App() {
                 <>
                   <div className="audio-box">
                     <div className="audio-copy">
-                      <p className="summary-label">Audio export</p>
-                      <p>{audioUrl ? '収録音声を確認して保存できます。' : '録音停止後に音声を書き出せます。'}</p>
+                      <p className="summary-label">Media export</p>
+                      <p>
+                        {recordingUrl || audioRecordingUrl
+                          ? '収録した動画または音声を選んで保存できます。'
+                          : '収録停止後に動画と音声を書き出せます。'}
+                      </p>
                     </div>
-                    {audioUrl ? (
+                    {recordingUrl || audioRecordingUrl ? (
                       <>
-                        <audio controls src={audioUrl} />
-                        <a href={audioUrl} download="podcast-session.webm" className="download-link">
-                          音声ファイルを保存
-                        </a>
+                        {recordingUrl ? <video controls src={recordingUrl} className="recording-preview" /> : null}
+                        {audioRecordingUrl ? (
+                          <audio controls>
+                            <source src={audioRecordingUrl} type={audioPreviewMimeType || undefined} />
+                          </audio>
+                        ) : null}
+                        <div className="download-format-picker" role="radiogroup" aria-label="保存する形式">
+                          <button
+                            type="button"
+                            className={`format-chip ${downloadFormat === 'video' ? 'is-active' : ''}`}
+                            onClick={() => setDownloadFormat('video')}
+                            disabled={!canDownloadVideo}
+                            aria-pressed={downloadFormat === 'video'}
+                          >
+                            動画
+                          </button>
+                          <button
+                            type="button"
+                            className={`format-chip ${downloadFormat === 'audio' ? 'is-active' : ''}`}
+                            onClick={() => setDownloadFormat('audio')}
+                            disabled={!canDownloadAudio}
+                            aria-pressed={downloadFormat === 'audio'}
+                          >
+                            音声
+                          </button>
+                        </div>
+                        {selectedDownload.blob ? (
+                          <button type="button" onClick={handleDownload} className="download-link">
+                            {selectedDownload.label}
+                          </button>
+                        ) : (
+                          <p className="placeholder">選択した形式はまだ保存できません。</p>
+                        )}
                       </>
                     ) : (
-                      <p className="placeholder">まだ保存可能な音声はありません。</p>
+                      <p className="placeholder">まだ保存可能な動画・音声はありません。</p>
                     )}
                   </div>
                   <div className="summary-box">
@@ -582,6 +854,62 @@ function useElapsedTime(startedAt: number | null) {
   }, [startedAt])
 
   return elapsed
+}
+
+async function convertAudioBlobToWav(sourceBlob: Blob) {
+  const arrayBuffer = await sourceBlob.arrayBuffer()
+  const audioContext = new AudioContext()
+
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+    const wavBuffer = encodeAudioBufferToWav(audioBuffer)
+    return new Blob([wavBuffer], { type: 'audio/wav' })
+  } finally {
+    await audioContext.close()
+  }
+}
+
+function encodeAudioBufferToWav(audioBuffer: AudioBuffer) {
+  const { numberOfChannels, sampleRate } = audioBuffer
+  const frameCount = audioBuffer.length
+  const bytesPerSample = 2
+  const blockAlign = numberOfChannels * bytesPerSample
+  const buffer = new ArrayBuffer(44 + frameCount * blockAlign)
+  const view = new DataView(buffer)
+
+  writeAscii(view, 0, 'RIFF')
+  view.setUint32(4, 36 + frameCount * blockAlign, true)
+  writeAscii(view, 8, 'WAVE')
+  writeAscii(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, numberOfChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bytesPerSample * 8, true)
+  writeAscii(view, 36, 'data')
+  view.setUint32(40, frameCount * blockAlign, true)
+
+  const channelData = Array.from({ length: numberOfChannels }, (_, index) => audioBuffer.getChannelData(index))
+  let offset = 44
+
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+    for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
+      const sample = Math.max(-1, Math.min(1, channelData[channelIndex][frameIndex] ?? 0))
+      const pcmValue = sample < 0 ? sample * 0x8000 : sample * 0x7fff
+      view.setInt16(offset, pcmValue, true)
+      offset += bytesPerSample
+    }
+  }
+
+  return buffer
+}
+
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index))
+  }
 }
 
 export default App
